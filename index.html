@@ -105,7 +105,23 @@ select.proj-status.active{color:var(--green);border-color:var(--green)}
 select.proj-status.paused{color:var(--amber);border-color:var(--amber)}
 .proj-body{padding:0 12px 12px}
 .proj-body textarea{width:100%;min-height:150px;resize:vertical;background:var(--card);font-size:13.5px;line-height:1.65}
-.proj-meta{font-size:11.5px;color:var(--text-soft);margin-top:4px}
+.proj-meta{font-size:11.5px;color:var(--text-soft);margin-top:6px}
+.proj-prog{font-size:11.5px;color:var(--text-soft);background:var(--card);border:1px solid var(--border);border-radius:999px;padding:1px 9px;flex:none}
+.pl-bar{height:4px;background:var(--border);border-radius:2px;margin:2px 0 10px;overflow:hidden}
+.pl-bar i{display:block;height:100%;background:var(--green);border-radius:2px;transition:width .25s}
+.plan-list{font-size:13.5px;line-height:1.55;background:var(--card);border:1px solid var(--border);border-radius:9px;padding:10px 12px}
+.pl-head{font-weight:700;margin:9px 0 3px;cursor:text}
+.pl-head:first-child{margin-top:0}
+.pl-sep{border-top:1px dashed var(--border);margin:6px 0}
+.pl-blank{height:6px}
+.pl-note{color:var(--text-soft);font-size:12.5px;margin:0 0 2px 25px;cursor:text}
+.pl-item{display:flex;gap:8px;align-items:flex-start;padding:2px 0}
+.pl-item input[type=checkbox]{width:15px;height:15px;margin-top:3px;accent-color:var(--green);flex:none;cursor:pointer}
+.pl-item.done .pl-text{text-decoration:line-through;color:var(--text-soft)}
+.pl-text{cursor:text;word-break:break-word;flex:1;min-width:0}
+.pl-text input,.pl-head input,.pl-note input{width:100%;font-size:13px;padding:2px 6px}
+.proj-tools{display:flex;gap:8px;margin-top:10px;align-items:center}
+.pl-add{flex:1;font-size:13px;padding:6px 10px;min-width:0}
 
 /* ---------- 设置弹窗 ---------- */
 #overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;display:flex;align-items:center;justify-content:center;padding:16px}
@@ -398,7 +414,7 @@ function render(){
 
 /* ======== 科研项目 ======== */
 const PSTAT={active:'▶ 进行中',paused:'⏸ 暂停',done:'✔ 已完成'};
-const OPEN=new Set();const projTimers={};
+const OPEN=new Set();const EDITMODE=new Set();const projTimers={};
 function findProj(id){return DATA.projects.find(p=>p.id===id)}
 function addProject(){
   const name=prompt('项目名称：');
@@ -413,24 +429,78 @@ function delProject(id){
   DATA.tombstones.push({id,deletedAt:Date.now()});
   persist();renderProjects();
 }
+const DONE_RE=/^✔ ?/;
+function lineKind(s){
+  if(!s.trim())return 'blank';
+  if(/^\s*[=\-—_]{4,}\s*$/.test(s))return 'sep';
+  if(/^[■【#]/.test(s))return 'head';
+  if(/^[\s(（]/.test(s))return 'note';
+  return 'item';
+}
+function planStats(plan){
+  let total=0,done=0;
+  for(const l of (plan||'').split('\n')){
+    if(lineKind(l)==='item'){total++;if(DONE_RE.test(l))done++}
+  }
+  return {total,done};
+}
+function planListHTML(p){
+  const lines=(p.plan||'').split('\n');
+  const rows=lines.map((l,i)=>{
+    const k=lineKind(l);
+    if(k==='blank')return '<div class="pl-blank"></div>';
+    if(k==='sep')return '<div class="pl-sep"></div>';
+    if(k==='head')return `<div class="pl-head" data-pact="line" data-line="${i}">${esc(l)}</div>`;
+    if(k==='note')return `<div class="pl-note" data-pact="line" data-line="${i}">${esc(l.trim())}</div>`;
+    const done=DONE_RE.test(l);
+    return `<div class="pl-item ${done?'done':''}">
+      <input type="checkbox" ${done?'checked':''} data-pact="check" data-line="${i}">
+      <span class="pl-text" data-pact="line" data-line="${i}">${esc(l.replace(DONE_RE,''))}</span>
+    </div>`;
+  });
+  return `<div class="plan-list">${rows.join('')||''}</div>`;
+}
 function renderProjects(){
   const ord={active:0,paused:1,done:2};
   const list=[...DATA.projects].sort((a,b)=>(ord[a.status]-ord[b.status])||(a.createdAt-b.createdAt));
-  $('projList').innerHTML=list.map(p=>`
+  $('projList').innerHTML=list.map(p=>{
+    const st=planStats(p.plan);
+    const pct=st.total?Math.round(st.done/st.total*100):0;
+    const mode=EDITMODE.has(p.id)?'edit':'list';
+    return `
   <div class="proj ${OPEN.has(p.id)?'open':''}" data-pid="${p.id}">
     <div class="proj-head" data-pact="toggle">
       <span class="arrow">▶</span>
       <span class="proj-name" data-pact="rename">${esc(p.name)}</span>
+      ${st.total?`<span class="proj-prog">${st.done}/${st.total}</span>`:''}
       <select class="proj-status ${p.status}" data-pact="status">
         ${Object.entries(PSTAT).map(([k,v])=>`<option value="${k}"${k===p.status?' selected':''}>${v}</option>`).join('')}
       </select>
       <button class="del-btn" data-pact="pdel" title="删除项目">✕</button>
     </div>
     ${OPEN.has(p.id)?`<div class="proj-body">
-      <textarea data-pact="plan" placeholder="项目详细规划：目标、阶段划分、当前进度、下一步、随时改…">${esc(p.plan||'')}</textarea>
-      <div class="proj-meta">最后编辑 ${new Date(p.updatedAt).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}</div>
+      ${st.total?`<div class="pl-bar"><i style="width:${pct}%"></i></div>`:''}
+      ${mode==='edit'
+        ?`<textarea data-pact="plan" placeholder="项目详细规划：每行一条；行首打 ■ 为分节标题；行首空格为附注小字">${esc(p.plan||'')}</textarea>
+          <div class="proj-tools"><button class="small-btn" data-pact="modelist">✔ 完成编辑，回到清单</button></div>`
+        :`${planListHTML(p)}
+          <div class="proj-tools">
+            <input type="text" class="pl-add" data-pact="addline" placeholder="＋ 加一条，回车确认">
+            <button class="small-btn" data-pact="modeedit">✎ 编辑全文</button>
+          </div>`}
+      <div class="proj-meta">打勾＝该条完成 · 点行文字可直接改（清空＝删行） · 最后编辑 ${new Date(p.updatedAt).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}</div>
     </div>`:''}
-  </div>`).join('')||'<div style="color:var(--text-soft);font-size:13px">还没有项目——点右上角"＋ 新项目"，每个项目一块随时可改的规划区</div>';
+  </div>`}).join('')||'<div style="color:var(--text-soft);font-size:13px">还没有项目——点右上角"＋ 新项目"，每个项目一份逐条可打勾的规划清单</div>';
+}
+function inlineEdit(el,value,onCommit){
+  if(el.querySelector('input'))return;
+  const inp=document.createElement('input');inp.value=value;
+  el.textContent='';el.appendChild(inp);inp.focus();inp.select();
+  let fin=false;
+  const commit=()=>{if(fin)return;fin=true;onCommit(inp.value);renderProjects()};
+  inp.addEventListener('blur',commit);
+  inp.addEventListener('keydown',ev=>{if(ev.key==='Enter')commit();if(ev.key==='Escape'){fin=true;renderProjects()}});
+  inp.addEventListener('click',ev=>ev.stopPropagation());
 }
 document.addEventListener('click',e=>{
   const el=e.target.closest('[data-pact]');if(!el)return;
@@ -441,16 +511,51 @@ document.addEventListener('click',e=>{
     OPEN.has(id)?OPEN.delete(id):OPEN.add(id);renderProjects();
   }else if(act==='pdel'){delProject(id)}
   else if(act==='rename'){
-    if(el.querySelector('input'))return;
     const p=findProj(id);if(!p)return;
-    const inp=document.createElement('input');inp.value=p.name;
-    el.textContent='';el.appendChild(inp);inp.focus();inp.select();
-    let fin=false;
-    const commit=()=>{if(fin)return;fin=true;const v=inp.value.trim();if(v&&v!==p.name){p.name=v;touch(p);persist()}renderProjects()};
-    inp.addEventListener('blur',commit);
-    inp.addEventListener('keydown',ev=>{if(ev.key==='Enter')commit();if(ev.key==='Escape'){fin=true;renderProjects()}});
-    inp.addEventListener('click',ev=>ev.stopPropagation());
+    inlineEdit(el,p.name,v=>{v=v.trim();if(v&&v!==p.name){p.name=v;touch(p);persist()}});
   }
+  else if(act==='check'){
+    const p=findProj(id);if(!p)return;
+    const i=+el.dataset.line;
+    const lines=(p.plan||'').split('\n');
+    if(i>=lines.length)return;
+    lines[i]=DONE_RE.test(lines[i])?lines[i].replace(DONE_RE,''):'✔ '+lines[i];
+    p.plan=lines.join('\n');touch(p);persist();renderProjects();
+  }
+  else if(act==='line'){
+    const p=findProj(id);if(!p)return;
+    const i=+el.dataset.line;
+    const lines=(p.plan||'').split('\n');
+    if(i>=lines.length)return;
+    const orig=lines[i];
+    const prefix=(orig.match(/^✔ ?/)||orig.match(/^\s*/))[0];
+    inlineEdit(el,orig.replace(/^✔ ?/,'').replace(/^\s+/,''),v=>{
+      v=v.trim();
+      if(!v)lines.splice(i,1);           /* 清空即删行 */
+      else lines[i]=prefix+v;
+      p.plan=lines.join('\n');touch(p);persist();
+    });
+  }
+  else if(act==='modeedit'){EDITMODE.add(id);renderProjects()}
+  else if(act==='modelist'){
+    const ta=card.querySelector('textarea[data-pact="plan"]');
+    if(ta){const p=findProj(id);clearTimeout(projTimers[id]);
+      if(p&&ta.value!==p.plan){p.plan=ta.value;touch(p);persist()}}
+    EDITMODE.delete(id);renderProjects();
+  }
+});
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Enter')return;
+  const el=e.target.closest('input[data-pact="addline"]');if(!el)return;
+  const v=el.value.trim();if(!v)return;
+  const card=el.closest('[data-pid]');if(!card)return;
+  const p=findProj(card.dataset.pid);if(!p)return;
+  p.plan=(p.plan?p.plan+'\n':'')+v;
+  touch(p);persist();renderProjects();
+  requestAnimationFrame(()=>{
+    const c=$('projList').querySelector(`[data-pid="${p.id}"] input[data-pact="addline"]`);
+    if(c)c.focus();
+  });
 });
 document.addEventListener('change',e=>{
   const el=e.target.closest('select[data-pact="status"]');if(!el)return;
