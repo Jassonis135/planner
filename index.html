@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1a56a0">
+<title>事务规划</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%231a56a0'/><text x='50' y='72' font-size='58' text-anchor='middle' fill='white'>✓</text></svg>">
+<style>
+:root{
+  --bg:#f4f6f8; --card:#ffffff; --text:#1d2129; --text-soft:#57606a;
+  --accent:#1a56a0; --accent-soft:#e8f0fb; --border:#e2e6ea;
+  --red:#d64545; --amber:#b7791f; --green:#2e8b57;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#12151a; --card:#1c2129; --text:#e6e9ee; --text-soft:#9aa4b2;
+    --accent:#6ea8e8; --accent-soft:#1d2c40; --border:#2a313b;
+    --red:#e06c6c; --amber:#d9a94e; --green:#5cb884;
+  }
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;font-size:15px;line-height:1.5}
+button{font-family:inherit;cursor:pointer}
+input,select,textarea{font-family:inherit;font-size:14px;color:var(--text);background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px 10px;outline:none}
+input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+
+/* ---------- 锁屏 ---------- */
+#lock{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:100}
+.lock-box{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:36px 32px;width:320px;max-width:90vw;text-align:center;box-shadow:0 8px 30px rgba(0,0,0,.12)}
+.lock-box .icon{font-size:40px}
+.lock-box h1{font-size:19px;margin:10px 0 18px}
+.lock-box input{width:100%;text-align:center;font-size:16px;letter-spacing:2px}
+.lock-box button{width:100%;margin-top:12px;background:var(--accent);color:#fff;border:none;border-radius:8px;padding:10px;font-size:15px}
+.lock-box .err{color:var(--red);font-size:13px;margin-top:10px;min-height:18px}
+.lock-box label{display:flex;gap:6px;justify-content:center;font-size:13px;color:var(--text-soft);margin-top:12px}
+@keyframes shake{20%,60%{transform:translateX(-7px)}40%,80%{transform:translateX(7px)}}
+.shake{animation:shake .4s}
+
+/* ---------- 顶栏 ---------- */
+header{position:sticky;top:0;z-index:10;background:var(--card);border-bottom:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+header .title{font-weight:700;font-size:17px}
+header .date{color:var(--text-soft);font-size:13px}
+header .stat{font-size:13px;color:var(--text-soft);background:var(--accent-soft);border-radius:999px;padding:3px 12px}
+header .spacer{flex:1}
+#syncDot{width:9px;height:9px;border-radius:50%;background:#999;display:inline-block;margin-right:2px}
+#syncDot.ok{background:var(--green)} #syncDot.syncing{background:var(--amber);animation:pulse 1s infinite} #syncDot.err{background:var(--red)}
+@keyframes pulse{50%{opacity:.3}}
+#syncLabel{font-size:12.5px;color:var(--text-soft)}
+header .btn{background:none;border:1px solid var(--border);border-radius:8px;padding:6px 11px;font-size:13.5px;color:var(--text)}
+header .btn:hover{border-color:var(--accent);color:var(--accent)}
+
+main{max-width:1180px;margin:0 auto;padding:16px}
+
+/* ---------- 快速添加 ---------- */
+.quickadd{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.quickadd input[type=text]{flex:1 1 260px}
+.quickadd .add{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 20px;font-size:14.5px}
+
+/* ---------- 看板 ---------- */
+.board{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+@media(max-width:980px){.board{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:560px){.board{grid-template-columns:1fr}}
+.col{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px;min-height:120px}
+.col h3{font-size:14.5px;margin:2px 4px 10px;display:flex;justify-content:space-between;align-items:center}
+.col h3 .cnt{font-size:12px;color:var(--text-soft);background:var(--bg);border-radius:999px;padding:1px 9px}
+.task{display:flex;gap:8px;align-items:flex-start;background:var(--bg);border:1px solid var(--border);border-left:3px solid transparent;border-radius:9px;padding:8px 9px;margin-bottom:8px}
+.task.pri-high{border-left-color:var(--red)}
+.task.pri-low{border-left-color:#9aa4b2;opacity:.85}
+.task input[type=checkbox]{width:17px;height:17px;margin-top:2px;accent-color:var(--accent);cursor:pointer;flex:none}
+.t-body{flex:1;min-width:0}
+.t-text{font-size:14.3px;word-break:break-word;cursor:text}
+.t-text input{width:100%;padding:2px 6px;font-size:14.3px}
+.t-meta{font-size:12px;color:var(--text-soft);margin-top:2px}
+.t-meta .overdue{color:var(--red);font-weight:600}
+.t-acts{display:flex;flex-direction:column;gap:4px;align-items:flex-end;flex:none}
+.t-acts select{font-size:11.5px;padding:1px 3px;border-radius:6px;background:var(--card);color:var(--text-soft)}
+.t-acts .row{display:flex;gap:6px;align-items:center}
+.pri-btn{border:none;background:none;font-size:13px;line-height:1;padding:2px}
+.del-btn{border:none;background:none;color:var(--text-soft);font-size:13px;padding:2px}
+.del-btn:hover{color:var(--red)}
+
+/* ---------- 备忘 & 已完成 ---------- */
+.panel{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-top:16px}
+.panel h3{font-size:14.5px;margin-bottom:8px}
+#memo{width:100%;min-height:90px;resize:vertical;background:var(--bg)}
+#doneList .task{opacity:.7}
+#doneList .t-text{text-decoration:line-through}
+.panel .head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.panel .head h3{margin:0}
+.small-btn{background:none;border:1px solid var(--border);border-radius:7px;padding:4px 10px;font-size:12.5px;color:var(--text-soft)}
+.small-btn:hover{border-color:var(--red);color:var(--red)}
+
+/* ---------- 设置弹窗 ---------- */
+#overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;display:flex;align-items:center;justify-content:center;padding:16px}
+.modal{background:var(--card);border-radius:14px;padding:22px;width:520px;max-width:100%;max-height:88vh;overflow-y:auto}
+.modal h2{font-size:17px;margin-bottom:14px}
+.modal h4{font-size:14px;margin:16px 0 6px}
+.modal p{font-size:13px;color:var(--text-soft);margin:6px 0}
+.modal ol{font-size:13px;color:var(--text-soft);padding-left:20px}
+.modal ol li{margin:4px 0}
+.modal input[type=password],.modal input[type=text]{width:100%}
+.modal .row{display:flex;gap:8px;margin-top:8px}
+.modal .row button{border:none;border-radius:8px;padding:8px 16px;font-size:14px}
+.modal .primary{background:var(--accent);color:#fff}
+.modal .ghost{background:var(--bg);color:var(--text);border:1px solid var(--border)}
+.modal .close{position:sticky;float:right;border:none;background:none;font-size:18px;color:var(--text-soft)}
+.modal a{color:var(--accent)}
+.tag-ok{color:var(--green);font-size:13px} .tag-err{color:var(--red);font-size:13px}
+footer{text-align:center;color:var(--text-soft);font-size:12px;padding:20px 0 30px}
+[hidden]{display:none !important}
+</style>
+</head>
+<body>
+
+<!-- ================= 锁屏 ================= -->
+<div id="lock">
+  <div class="lock-box" id="lockBox">
+    <div class="icon">🔐</div>
+    <h1>个人事务规划</h1>
+    <input type="password" id="pw" placeholder="输入密码" autocomplete="current-password">
+    <button id="unlockBtn">解锁</button>
+    <div class="err" id="lockErr"></div>
+    <label><input type="checkbox" id="remember" checked>本次浏览器会话内免密</label>
+  </div>
+</div>
+
+<!-- ================= 主界面 ================= -->
+<div id="app" hidden>
+<header>
+  <span class="title">🗂️ 事务规划</span>
+  <span class="date" id="today"></span>
+  <span class="stat" id="stat"></span>
+  <span class="spacer"></span>
+  <span><span id="syncDot"></span> <span id="syncLabel">未同步</span></span>
+  <button class="btn" id="syncBtn" title="立即同步">↻ 同步</button>
+  <button class="btn" id="setBtn">⚙ 设置</button>
+  <button class="btn" id="lockBtn">🔒 锁定</button>
+</header>
+
+<main>
+  <div class="quickadd">
+    <input type="text" id="newText" placeholder="添加任务，回车确认…">
+    <select id="newBucket">
+      <option value="inbox">📥 收件箱</option>
+      <option value="today">🔥 今天</option>
+      <option value="week">📅 本周</option>
+      <option value="later">🌊 以后</option>
+    </select>
+    <select id="newPri">
+      <option value="normal">普通</option>
+      <option value="high">🔴 重要</option>
+      <option value="low">⚪ 次要</option>
+    </select>
+    <input type="date" id="newDue" title="截止日期（可选）">
+    <button class="add" id="addBtn">添加</button>
+  </div>
+
+  <div class="board" id="board"></div>
+
+  <div class="panel">
+    <h3>📝 规划备忘</h3>
+    <textarea id="memo" placeholder="本周目标、长期规划、随手记…（和任务一样加密保存）"></textarea>
+  </div>
+
+  <div class="panel">
+    <div class="head">
+      <h3>✅ 已完成 <span id="doneCnt" style="color:var(--text-soft);font-weight:400;font-size:13px"></span></h3>
+      <button class="small-btn" id="clearDone">清空已完成</button>
+    </div>
+    <div id="doneList"></div>
+  </div>
+</main>
+<footer>数据经 AES-256 加密存储 · 忘记打勾的事不会自己完成 :)</footer>
+</div>
+
+<!-- ================= 设置 ================= -->
+<div id="overlay" hidden>
+  <div class="modal">
+    <button class="close" id="closeSet">✕</button>
+    <h2>⚙ 设置</h2>
+
+    <h4>☁️ 多设备同步（GitHub 私有仓库）</h4>
+    <p id="syncState">未配置。配置后任务会加密同步到私有仓库 <b>Jassonis135/sunggaai-data</b>，手机电脑通用。</p>
+    <ol>
+      <li>打开 <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">GitHub → Fine-grained token</a>（需登录 Jassonis135）</li>
+      <li>Token name 随意；Expiration 选最长；Repository access 选 <b>Only select repositories → sunggaai-data</b></li>
+      <li>Permissions → Repository permissions → <b>Contents: Read and write</b></li>
+      <li>Generate 后把 <code>github_pat_…</code> 粘贴到下面</li>
+    </ol>
+    <input type="password" id="tokenInput" placeholder="github_pat_…" autocomplete="off">
+    <div class="row">
+      <button class="primary" id="saveToken">保存并测试</button>
+      <button class="ghost" id="dropToken">断开同步</button>
+      <span id="tokenMsg" style="align-self:center"></span>
+    </div>
+
+    <h4>💾 备份</h4>
+    <div class="row">
+      <button class="ghost" id="exportBtn">导出 JSON 备份</button>
+      <label class="ghost" style="border-radius:8px;padding:8px 16px;font-size:14px;border:1px solid var(--border);cursor:pointer">
+        导入备份<input type="file" id="importFile" accept=".json" hidden>
+      </label>
+    </div>
+    <p>导出为明文 JSON，请妥善保管；导入时与现有任务自动合并。</p>
+  </div>
+</div>
+
+<script>
+'use strict';
+/* ======== 常量 ======== */
+const VERIFIER='3ce9d0fd07bb210b59fca7ecacf22654e9d28774cfa24dc7632838bfde11b512';
+const VSALT='sunggaai-planner-v1', ITER=310000;
+const REPO='Jassonis135/sunggaai-data', FILE='data.blob', BRANCH='main';
+const BUCKETS={inbox:'📥 收件箱',today:'🔥 今天',week:'📅 本周',later:'🌊 以后'};
+const PRI_ICON={high:'🔴',normal:'🔵',low:'⚪'}, PRI_ORDER={high:0,normal:1,low:2}, PRI_NEXT={normal:'high',high:'low',low:'normal'};
+const $=id=>document.getElementById(id);
+
+let KEY=null, DATA=null, TOKEN=null, pushTimer=null, memoTimer=null;
+
+/* ======== 工具 ======== */
+function b64e(u8){let s='';for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000));return btoa(s)}
+function b64d(str){const s=atob(str),u=new Uint8Array(s.length);for(let i=0;i<s.length;i++)u[i]=s.charCodeAt(i);return u}
+const hex=u8=>[...u8].map(b=>b.toString(16).padStart(2,'0')).join('');
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+const todayStr=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const emptyData=()=>({version:1,tasks:[],tombstones:[],memo:'',memoUpdatedAt:0});
+
+/* ======== 加密 ======== */
+async function derive(pw){
+  const km=await crypto.subtle.importKey('raw',new TextEncoder().encode(pw),'PBKDF2',false,['deriveBits']);
+  const bits=new Uint8Array(await crypto.subtle.deriveBits(
+    {name:'PBKDF2',salt:new TextEncoder().encode(VSALT),iterations:ITER,hash:'SHA-256'},km,512));
+  return {ver:hex(bits.slice(0,32)),raw:bits.slice(32)};
+}
+const importKey=raw=>crypto.subtle.importKey('raw',raw,'AES-GCM',false,['encrypt','decrypt']);
+async function enc(str){
+  const iv=crypto.getRandomValues(new Uint8Array(12));
+  const ct=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},KEY,new TextEncoder().encode(str)));
+  const full=new Uint8Array(12+ct.length);full.set(iv);full.set(ct,12);
+  return b64e(full);
+}
+async function dec(blob){
+  const full=b64d(blob);
+  const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:full.slice(0,12)},KEY,full.slice(12));
+  return new TextDecoder().decode(pt);
+}
+
+/* ======== 解锁 ======== */
+async function unlock(){
+  const pw=$('pw').value;
+  if(!pw)return;
+  $('unlockBtn').disabled=true;$('lockErr').textContent='';
+  try{
+    const {ver,raw}=await derive(pw);
+    if(ver!==VERIFIER){
+      $('lockBox').classList.remove('shake');void $('lockBox').offsetWidth;$('lockBox').classList.add('shake');
+      $('lockErr').textContent='密码不对';$('unlockBtn').disabled=false;$('pw').select();return;
+    }
+    KEY=await importKey(raw);
+    if($('remember').checked)sessionStorage.setItem('sgp.k',b64e(raw));
+    await afterUnlock();
+  }catch(e){$('lockErr').textContent='出错了: '+e.message;$('unlockBtn').disabled=false}
+}
+async function afterUnlock(){
+  const blob=localStorage.getItem('sgp.blob');
+  try{DATA=blob?JSON.parse(await dec(blob)):emptyData()}
+  catch(e){$('lockErr').textContent='本地数据解密失败';$('unlockBtn').disabled=false;return}
+  const tb=localStorage.getItem('sgp.token');
+  if(tb){try{TOKEN=await dec(tb)}catch(e){TOKEN=null}}
+  $('lock').hidden=true;$('app').hidden=false;$('pw').value='';$('unlockBtn').disabled=false;
+  const d=new Date(),wd='日一二三四五六'[d.getDay()];
+  $('today').textContent=`${d.getMonth()+1}月${d.getDate()}日 周${wd}`;
+  render();syncNow(false);
+}
+function lockApp(){
+  KEY=null;DATA=null;TOKEN=null;sessionStorage.removeItem('sgp.k');
+  $('app').hidden=true;$('lock').hidden=false;$('pw').focus();
+}
+
+/* ======== 数据 ======== */
+async function persist(){
+  localStorage.setItem('sgp.blob',await enc(JSON.stringify(DATA)));
+  schedulePush();
+}
+function touch(t){t.updatedAt=Date.now()}
+function addTask(){
+  const text=$('newText').value.trim();
+  if(!text)return;
+  DATA.tasks.push({id:uid(),text,bucket:$('newBucket').value,pri:$('newPri').value,
+    due:$('newDue').value||null,done:false,createdAt:Date.now(),updatedAt:Date.now(),doneAt:null});
+  $('newText').value='';$('newDue').value='';
+  persist();render();$('newText').focus();
+}
+function findTask(id){return DATA.tasks.find(t=>t.id===id)}
+function toggleDone(id){const t=findTask(id);if(!t)return;t.done=!t.done;t.doneAt=t.done?Date.now():null;touch(t);persist();render()}
+function moveTask(id,b){const t=findTask(id);if(!t)return;t.bucket=b;touch(t);persist();render()}
+function cyclePri(id){const t=findTask(id);if(!t)return;t.pri=PRI_NEXT[t.pri]||'normal';touch(t);persist();render()}
+function delTask(id){
+  const i=DATA.tasks.findIndex(t=>t.id===id);
+  if(i<0)return;
+  DATA.tasks.splice(i,1);
+  DATA.tombstones.push({id,deletedAt:Date.now()});
+  persist();render();
+}
+function clearDone(){
+  const done=DATA.tasks.filter(t=>t.done);
+  if(!done.length)return;
+  if(!confirm(`删除全部 ${done.length} 条已完成任务？`))return;
+  const now=Date.now();
+  for(const t of done)DATA.tombstones.push({id:t.id,deletedAt:now});
+  DATA.tasks=DATA.tasks.filter(t=>!t.done);
+  persist();render();
+}
+function editTask(id,el){
+  if(el.querySelector('input'))return; /* 正在编辑中 */
+  const t=findTask(id);if(!t)return;
+  const inp=document.createElement('input');
+  inp.value=t.text;el.textContent='';el.appendChild(inp);inp.focus();inp.select();
+  let doneEdit=false;
+  const commit=()=>{
+    if(doneEdit)return;doneEdit=true;
+    const v=inp.value.trim();
+    if(v&&v!==t.text){t.text=v;touch(t);persist()}
+    render();
+  };
+  inp.addEventListener('blur',commit);
+  inp.addEventListener('keydown',e=>{if(e.key==='Enter')commit();if(e.key==='Escape'){doneEdit=true;render()}});
+}
+
+/* ======== 渲染 ======== */
+function taskHTML(t){
+  let meta='';
+  if(t.due){
+    const od=!t.done&&t.due<todayStr();
+    meta+=`<span class="${od?'overdue':''}">📅 ${t.due.slice(5)}${od?' 已过期':''}</span>`;
+  }
+  return `<div class="task pri-${t.pri}" data-id="${t.id}">
+    <input type="checkbox" ${t.done?'checked':''} data-act="done">
+    <div class="t-body">
+      <div class="t-text" data-act="edit">${esc(t.text)}</div>
+      ${meta?`<div class="t-meta">${meta}</div>`:''}
+    </div>
+    <div class="t-acts">
+      <div class="row">
+        <button class="pri-btn" data-act="pri" title="切换优先级">${PRI_ICON[t.pri]||'🔵'}</button>
+        <button class="del-btn" data-act="del" title="删除">✕</button>
+      </div>
+      ${t.done?'':`<select data-act="move">${Object.entries(BUCKETS).map(([k,v])=>
+        `<option value="${k}"${k===t.bucket?' selected':''}>${v}</option>`).join('')}</select>`}
+    </div>
+  </div>`;
+}
+function render(){
+  const sortFn=(a,b)=>(PRI_ORDER[a.pri]-PRI_ORDER[b.pri])
+    ||((a.due||'9999')===(b.due||'9999')?0:((a.due||'9999')<(b.due||'9999')?-1:1))
+    ||(a.createdAt-b.createdAt);
+  const open=DATA.tasks.filter(t=>!t.done);
+  $('board').innerHTML=Object.entries(BUCKETS).map(([k,label])=>{
+    const list=open.filter(t=>t.bucket===k).sort(sortFn);
+    return `<div class="col"><h3>${label}<span class="cnt">${list.length}</span></h3>${list.map(taskHTML).join('')||'<div style="color:var(--text-soft);font-size:13px;text-align:center;padding:14px 0">空</div>'}</div>`;
+  }).join('');
+  const done=DATA.tasks.filter(t=>t.done).sort((a,b)=>(b.doneAt||0)-(a.doneAt||0));
+  $('doneList').innerHTML=done.slice(0,60).map(taskHTML).join('')||'<div style="color:var(--text-soft);font-size:13px">还没有完成的任务</div>';
+  $('doneCnt').textContent=done.length?`(${done.length})`:'';
+  const todayOpen=open.filter(t=>t.bucket==='today').length;
+  const doneToday=done.filter(t=>t.doneAt&&new Date(t.doneAt).toDateString()===new Date().toDateString()).length;
+  $('stat').textContent=`今天待办 ${todayOpen} · 已完成 ${doneToday}`;
+  if(document.activeElement!==$('memo'))$('memo').value=DATA.memo||'';
+}
+document.addEventListener('click',e=>{
+  const el=e.target.closest('[data-act]');if(!el)return;
+  const card=el.closest('.task');if(!card)return;
+  const id=card.dataset.id,act=el.dataset.act;
+  if(act==='done')toggleDone(id);
+  else if(act==='pri')cyclePri(id);
+  else if(act==='del')delTask(id);
+  else if(act==='edit')editTask(id,el);
+});
+document.addEventListener('change',e=>{
+  const el=e.target.closest('[data-act="move"]');if(!el)return;
+  moveTask(el.closest('.task').dataset.id,el.value);
+});
+
+/* ======== 合并 ======== */
+function mergeData(a,b){
+  const tomb=new Map();
+  for(const t of [...(a.tombstones||[]),...(b.tombstones||[])]){
+    const p=tomb.get(t.id);if(!p||t.deletedAt>p.deletedAt)tomb.set(t.id,t);
+  }
+  const tasks=new Map();
+  for(const t of [...(a.tasks||[]),...(b.tasks||[])]){
+    const p=tasks.get(t.id);if(!p||(t.updatedAt||0)>(p.updatedAt||0))tasks.set(t.id,t);
+  }
+  for(const [id,tb] of tomb){
+    const t=tasks.get(id);
+    if(t&&tb.deletedAt>(t.updatedAt||0))tasks.delete(id);
+  }
+  const cutoff=Date.now()-90*864e5;
+  const memoA=(a.memoUpdatedAt||0)>=(b.memoUpdatedAt||0);
+  return {version:1,tasks:[...tasks.values()],
+    tombstones:[...tomb.values()].filter(t=>t.deletedAt>cutoff),
+    memo:memoA?(a.memo||''):(b.memo||''),
+    memoUpdatedAt:memoA?(a.memoUpdatedAt||0):(b.memoUpdatedAt||0)};
+}
+const canon=d=>JSON.stringify({
+  t:[...d.tasks].sort((a,b)=>a.id<b.id?-1:1),
+  tb:[...d.tombstones].sort((a,b)=>a.id<b.id?-1:1),
+  m:d.memo,mu:d.memoUpdatedAt});
+
+/* ======== GitHub 同步 ======== */
+const ghHeaders=()=>({'Authorization':'Bearer '+TOKEN,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'});
+const ghURL=`https://api.github.com/repos/${REPO}/contents/${FILE}`;
+async function ghGet(){
+  const r=await fetch(`${ghURL}?ref=${BRANCH}&_=${Date.now()}`,{headers:ghHeaders(),cache:'no-store'});
+  if(r.status===404)return null;
+  if(!r.ok)throw new Error('拉取失败 HTTP '+r.status);
+  const j=await r.json();
+  return {blob:j.content.replace(/\s/g,''),sha:j.sha};
+}
+async function ghPut(blobText,sha){
+  const body={message:'sync '+new Date().toISOString(),content:btoa(blobText),branch:BRANCH};
+  if(sha)body.sha=sha;
+  const r=await fetch(ghURL,{method:'PUT',headers:ghHeaders(),body:JSON.stringify(body)});
+  if(r.status===409||r.status===422)return false;
+  if(!r.ok)throw new Error('推送失败 HTTP '+r.status);
+  return true;
+}
+function setSync(s,label){
+  $('syncDot').className=s;
+  $('syncLabel').textContent=label||{ok:'已同步',syncing:'同步中…',err:'同步失败','':'未同步'}[s]||'';
+}
+function schedulePush(){
+  if(!TOKEN)return;
+  clearTimeout(pushTimer);
+  pushTimer=setTimeout(()=>syncNow(false),2000);
+}
+async function syncNow(manual){
+  if(!TOKEN){if(manual)openSettings();return}
+  setSync('syncing');
+  try{
+    for(let attempt=0;attempt<2;attempt++){
+      const remote=await ghGet();
+      let remoteData=null;
+      if(remote){
+        try{remoteData=JSON.parse(await dec(atob(remote.blob)))}
+        catch(e){/* 远端数据无法解密：视为无效，将被覆盖 */}
+      }
+      const merged=remoteData?mergeData(DATA,remoteData):DATA;
+      if(canon(merged)!==canon(DATA)){DATA=merged;localStorage.setItem('sgp.blob',await enc(JSON.stringify(DATA)));render()}
+      if(remoteData&&canon(merged)===canon(remoteData)){setSync('ok');return}
+      const ok=await ghPut(await enc(JSON.stringify(merged)),remote&&remote.sha);
+      if(ok){setSync('ok');return}
+      /* sha 冲突 → 重拉一次 */
+    }
+    throw new Error('冲突重试失败');
+  }catch(e){console.error(e);setSync('err');if(manual)alert('同步失败：'+e.message)}
+}
+
+/* ======== 设置 ======== */
+function openSettings(){
+  $('overlay').hidden=false;
+  $('tokenMsg').textContent='';
+  $('syncState').innerHTML=TOKEN
+    ?'✅ 已配置同步 → 私有仓库 <b>Jassonis135/sunggaai-data</b>（数据为密文）'
+    :'未配置。配置后任务会加密同步到私有仓库 <b>Jassonis135/sunggaai-data</b>，手机电脑通用。';
+}
+async function saveToken(){
+  const tk=$('tokenInput').value.trim();
+  if(!tk){$('tokenMsg').innerHTML='<span class="tag-err">请先粘贴 token</span>';return}
+  $('tokenMsg').textContent='测试中…';
+  try{
+    const r=await fetch(`https://api.github.com/repos/${REPO}`,{headers:{'Authorization':'Bearer '+tk,'Accept':'application/vnd.github+json'}});
+    if(!r.ok)throw new Error('HTTP '+r.status+'（检查 token 权限是否包含 sunggaai-data 的 Contents 读写）');
+    TOKEN=tk;
+    localStorage.setItem('sgp.token',await enc(tk));
+    $('tokenInput').value='';
+    $('tokenMsg').innerHTML='<span class="tag-ok">✅ 连接成功，已启用同步</span>';
+    openSettings();syncNow(false);
+  }catch(e){$('tokenMsg').innerHTML='<span class="tag-err">❌ '+esc(e.message)+'</span>'}
+}
+function dropToken(){
+  TOKEN=null;localStorage.removeItem('sgp.token');
+  setSync('','未同步');openSettings();
+}
+function exportJSON(){
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([JSON.stringify(DATA,null,2)],{type:'application/json'}));
+  a.download='planner-backup-'+todayStr()+'.json';
+  a.click();URL.revokeObjectURL(a.href);
+}
+function importJSON(file){
+  const rd=new FileReader();
+  rd.onload=()=>{
+    try{
+      const d=JSON.parse(rd.result);
+      if(!Array.isArray(d.tasks))throw new Error('格式不对');
+      DATA=mergeData(DATA,d);
+      persist();render();
+      alert('导入完成，共 '+DATA.tasks.length+' 条任务');
+    }catch(e){alert('导入失败：'+e.message)}
+  };
+  rd.readAsText(file);
+}
+
+/* ======== 事件绑定 ======== */
+$('unlockBtn').onclick=unlock;
+$('pw').addEventListener('keydown',e=>{if(e.key==='Enter')unlock()});
+$('lockBtn').onclick=lockApp;
+$('addBtn').onclick=addTask;
+$('newText').addEventListener('keydown',e=>{if(e.key==='Enter')addTask()});
+$('syncBtn').onclick=()=>syncNow(true);
+$('setBtn').onclick=openSettings;
+$('closeSet').onclick=()=>$('overlay').hidden=true;
+$('overlay').addEventListener('click',e=>{if(e.target===$('overlay'))$('overlay').hidden=true});
+$('saveToken').onclick=saveToken;
+$('dropToken').onclick=dropToken;
+$('exportBtn').onclick=exportJSON;
+$('importFile').addEventListener('change',e=>{if(e.target.files[0])importJSON(e.target.files[0]);e.target.value=''});
+$('clearDone').onclick=clearDone;
+$('memo').addEventListener('input',()=>{
+  clearTimeout(memoTimer);
+  memoTimer=setTimeout(()=>{DATA.memo=$('memo').value;DATA.memoUpdatedAt=Date.now();persist()},400);
+});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&KEY&&TOKEN)syncNow(false)});
+
+/* ======== 启动：会话内免密恢复 ======== */
+(async()=>{
+  const k=sessionStorage.getItem('sgp.k');
+  if(k){
+    try{KEY=await importKey(b64d(k));await afterUnlock();return}
+    catch(e){sessionStorage.removeItem('sgp.k')}
+  }
+  $('pw').focus();
+})();
+</script>
+</body>
+</html>
