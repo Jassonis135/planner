@@ -90,6 +90,22 @@ main{max-width:1180px;margin:0 auto;padding:16px}
 .panel .head h3{margin:0}
 .small-btn{background:none;border:1px solid var(--border);border-radius:7px;padding:4px 10px;font-size:12.5px;color:var(--text-soft)}
 .small-btn:hover{border-color:var(--red);color:var(--red)}
+.small-btn.add-proj{border-color:var(--accent);color:var(--accent)}
+.small-btn.add-proj:hover{background:var(--accent-soft)}
+
+/* ---------- 科研项目 ---------- */
+.proj{border:1px solid var(--border);border-radius:10px;margin-bottom:10px;background:var(--bg)}
+.proj-head{display:flex;gap:9px;align-items:center;padding:9px 12px;cursor:pointer}
+.proj-head .arrow{font-size:11px;color:var(--text-soft);transition:transform .15s;flex:none}
+.proj.open .arrow{transform:rotate(90deg)}
+.proj-name{font-weight:600;font-size:14.5px;flex:1;min-width:0;word-break:break-word}
+.proj-name input{width:100%;font-size:14.5px;padding:2px 6px}
+select.proj-status{font-size:12px;border-radius:999px;padding:2px 8px;border:1px solid var(--border);background:var(--card);color:var(--text-soft);flex:none}
+select.proj-status.active{color:var(--green);border-color:var(--green)}
+select.proj-status.paused{color:var(--amber);border-color:var(--amber)}
+.proj-body{padding:0 12px 12px}
+.proj-body textarea{width:100%;min-height:150px;resize:vertical;background:var(--card);font-size:13.5px;line-height:1.65}
+.proj-meta{font-size:11.5px;color:var(--text-soft);margin-top:4px}
 
 /* ---------- 设置弹窗 ---------- */
 #overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;display:flex;align-items:center;justify-content:center;padding:16px}
@@ -159,6 +175,14 @@ footer{text-align:center;color:var(--text-soft);font-size:12px;padding:20px 0 30
   <div class="board" id="board"></div>
 
   <div class="panel">
+    <div class="head">
+      <h3>🔬 科研项目</h3>
+      <button class="small-btn add-proj" id="addProj">＋ 新项目</button>
+    </div>
+    <div id="projList"></div>
+  </div>
+
+  <div class="panel">
     <h3>📝 规划备忘</h3>
     <textarea id="memo" placeholder="本周目标、长期规划、随手记…（和任务一样加密保存）"></textarea>
   </div>
@@ -225,7 +249,7 @@ const hex=u8=>[...u8].map(b=>b.toString(16).padStart(2,'0')).join('');
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 const todayStr=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
 const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const emptyData=()=>({version:1,tasks:[],tombstones:[],memo:'',memoUpdatedAt:0});
+const emptyData=()=>({version:1,tasks:[],projects:[],tombstones:[],memo:'',memoUpdatedAt:0});
 
 /* ======== 加密 ======== */
 async function derive(pw){
@@ -267,6 +291,7 @@ async function afterUnlock(){
   const blob=localStorage.getItem('sgp.blob');
   try{DATA=blob?JSON.parse(await dec(blob)):emptyData()}
   catch(e){$('lockErr').textContent='本地数据解密失败';$('unlockBtn').disabled=false;return}
+  if(!DATA.projects)DATA.projects=[];
   const tb=localStorage.getItem('sgp.token');
   if(tb){try{TOKEN=await dec(tb)}catch(e){TOKEN=null}}
   $('lock').hidden=true;$('app').hidden=false;$('pw').value='';$('unlockBtn').disabled=false;
@@ -368,7 +393,79 @@ function render(){
   const doneToday=done.filter(t=>t.doneAt&&new Date(t.doneAt).toDateString()===new Date().toDateString()).length;
   $('stat').textContent=`今天待办 ${todayOpen} · 已完成 ${doneToday}`;
   if(document.activeElement!==$('memo'))$('memo').value=DATA.memo||'';
+  if(!$('projList').contains(document.activeElement))renderProjects();
 }
+
+/* ======== 科研项目 ======== */
+const PSTAT={active:'▶ 进行中',paused:'⏸ 暂停',done:'✔ 已完成'};
+const OPEN=new Set();const projTimers={};
+function findProj(id){return DATA.projects.find(p=>p.id===id)}
+function addProject(){
+  const name=prompt('项目名称：');
+  if(!name||!name.trim())return;
+  const p={id:uid(),name:name.trim(),status:'active',plan:'',createdAt:Date.now(),updatedAt:Date.now()};
+  DATA.projects.push(p);OPEN.add(p.id);persist();renderProjects();
+}
+function delProject(id){
+  const p=findProj(id);if(!p)return;
+  if(!confirm(`删除项目「${p.name}」及其全部规划内容？`))return;
+  DATA.projects=DATA.projects.filter(x=>x.id!==id);
+  DATA.tombstones.push({id,deletedAt:Date.now()});
+  persist();renderProjects();
+}
+function renderProjects(){
+  const ord={active:0,paused:1,done:2};
+  const list=[...DATA.projects].sort((a,b)=>(ord[a.status]-ord[b.status])||(a.createdAt-b.createdAt));
+  $('projList').innerHTML=list.map(p=>`
+  <div class="proj ${OPEN.has(p.id)?'open':''}" data-pid="${p.id}">
+    <div class="proj-head" data-pact="toggle">
+      <span class="arrow">▶</span>
+      <span class="proj-name" data-pact="rename">${esc(p.name)}</span>
+      <select class="proj-status ${p.status}" data-pact="status">
+        ${Object.entries(PSTAT).map(([k,v])=>`<option value="${k}"${k===p.status?' selected':''}>${v}</option>`).join('')}
+      </select>
+      <button class="del-btn" data-pact="pdel" title="删除项目">✕</button>
+    </div>
+    ${OPEN.has(p.id)?`<div class="proj-body">
+      <textarea data-pact="plan" placeholder="项目详细规划：目标、阶段划分、当前进度、下一步、随时改…">${esc(p.plan||'')}</textarea>
+      <div class="proj-meta">最后编辑 ${new Date(p.updatedAt).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}</div>
+    </div>`:''}
+  </div>`).join('')||'<div style="color:var(--text-soft);font-size:13px">还没有项目——点右上角"＋ 新项目"，每个项目一块随时可改的规划区</div>';
+}
+document.addEventListener('click',e=>{
+  const el=e.target.closest('[data-pact]');if(!el)return;
+  const card=el.closest('[data-pid]');if(!card)return;
+  const id=card.dataset.pid,act=el.dataset.pact;
+  if(act==='toggle'){
+    if(e.target.closest('select,input,button,textarea'))return;
+    OPEN.has(id)?OPEN.delete(id):OPEN.add(id);renderProjects();
+  }else if(act==='pdel'){delProject(id)}
+  else if(act==='rename'){
+    if(el.querySelector('input'))return;
+    const p=findProj(id);if(!p)return;
+    const inp=document.createElement('input');inp.value=p.name;
+    el.textContent='';el.appendChild(inp);inp.focus();inp.select();
+    let fin=false;
+    const commit=()=>{if(fin)return;fin=true;const v=inp.value.trim();if(v&&v!==p.name){p.name=v;touch(p);persist()}renderProjects()};
+    inp.addEventListener('blur',commit);
+    inp.addEventListener('keydown',ev=>{if(ev.key==='Enter')commit();if(ev.key==='Escape'){fin=true;renderProjects()}});
+    inp.addEventListener('click',ev=>ev.stopPropagation());
+  }
+});
+document.addEventListener('change',e=>{
+  const el=e.target.closest('select[data-pact="status"]');if(!el)return;
+  const p=findProj(el.closest('[data-pid]').dataset.pid);if(!p)return;
+  p.status=el.value;touch(p);persist();renderProjects();
+});
+document.addEventListener('input',e=>{
+  const el=e.target.closest('textarea[data-pact="plan"]');if(!el)return;
+  const id=el.closest('[data-pid]').dataset.pid;
+  clearTimeout(projTimers[id]);
+  projTimers[id]=setTimeout(()=>{
+    const p=findProj(id);if(!p)return;
+    p.plan=el.value;touch(p);persist();
+  },500);
+});
 document.addEventListener('click',e=>{
   const el=e.target.closest('[data-act]');if(!el)return;
   const card=el.closest('.task');if(!card)return;
@@ -393,19 +490,26 @@ function mergeData(a,b){
   for(const t of [...(a.tasks||[]),...(b.tasks||[])]){
     const p=tasks.get(t.id);if(!p||(t.updatedAt||0)>(p.updatedAt||0))tasks.set(t.id,t);
   }
+  const projs=new Map();
+  for(const p of [...(a.projects||[]),...(b.projects||[])]){
+    const q=projs.get(p.id);if(!q||(p.updatedAt||0)>(q.updatedAt||0))projs.set(p.id,p);
+  }
   for(const [id,tb] of tomb){
     const t=tasks.get(id);
     if(t&&tb.deletedAt>(t.updatedAt||0))tasks.delete(id);
+    const p=projs.get(id);
+    if(p&&tb.deletedAt>(p.updatedAt||0))projs.delete(id);
   }
   const cutoff=Date.now()-90*864e5;
   const memoA=(a.memoUpdatedAt||0)>=(b.memoUpdatedAt||0);
-  return {version:1,tasks:[...tasks.values()],
+  return {version:1,tasks:[...tasks.values()],projects:[...projs.values()],
     tombstones:[...tomb.values()].filter(t=>t.deletedAt>cutoff),
     memo:memoA?(a.memo||''):(b.memo||''),
     memoUpdatedAt:memoA?(a.memoUpdatedAt||0):(b.memoUpdatedAt||0)};
 }
 const canon=d=>JSON.stringify({
   t:[...d.tasks].sort((a,b)=>a.id<b.id?-1:1),
+  p:[...(d.projects||[])].sort((a,b)=>a.id<b.id?-1:1),
   tb:[...d.tombstones].sort((a,b)=>a.id<b.id?-1:1),
   m:d.memo,mu:d.memoUpdatedAt});
 
@@ -519,6 +623,7 @@ $('dropToken').onclick=dropToken;
 $('exportBtn').onclick=exportJSON;
 $('importFile').addEventListener('change',e=>{if(e.target.files[0])importJSON(e.target.files[0]);e.target.value=''});
 $('clearDone').onclick=clearDone;
+$('addProj').onclick=addProject;
 $('memo').addEventListener('input',()=>{
   clearTimeout(memoTimer);
   memoTimer=setTimeout(()=>{DATA.memo=$('memo').value;DATA.memoUpdatedAt=Date.now();persist()},400);
